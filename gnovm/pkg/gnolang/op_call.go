@@ -352,14 +352,14 @@ func (m *Machine) doOpReturnCallDefers() {
 		// If still in panic state pop this frame so doOpPanic2() will
 		// try doOpReturnCallDefers() in the previous frame.
 		if m.Exception != nil {
-			// If crossing a realm boundary find the revive frame
-			// for transaction revival.
-			if m.isRealmBoundary(cfr) {
-				cfr := m.PopUntilLastReviveFrame()
-				if cfr == nil {
-					// or abort the transaction.
-					panic(m.makeUnhandledPanicError())
+			// Check if we're in a revive frame for rollback
+			rvfr := m.PopUntilLastReviveFrame()
+			if rvfr != nil {
+				// Found a revive frame - restore cache and return exception
+				if rvfr.SavedStore != nil {
+					m.Store.CacheRestore(rvfr.SavedStore)
 				}
+				
 				m.PopFrameAndReturn()
 				// assign exception as return of revive().
 				resx := m.PeekValue(1)
@@ -367,11 +367,27 @@ func (m *Machine) doOpReturnCallDefers() {
 				m.Exception = nil // reset
 				return
 			}
+			
+			// No revive frame found - check if crossing realm boundary to abort
+			if m.isRealmBoundary(cfr) {
+				// Abort the transaction at realm boundary
+				panic(m.makeUnhandledPanicError())
+			}
+			
 			// Handle panic by calling OpReturnCallDefers on
 			// the next (last) call frame)
 			m.PopFrame()
 			m.PushOp(OpPanic2)
 		} else {
+			// No exception - check if this was a revive() frame
+			// If so, enforce the "must always panic" invariant
+			if cfr.IsRevive {
+				// The revive() function completed without panicking!
+				// This is not allowed - enforce the invariant by panicking now
+				m.pushPanic(typedString("revive() function must always panic"))
+				return
+			}
+			
 			// Otherwise continue with the return process,
 			// OpReturnFromBlock needs frame, don't pop here.
 			m.PushOp(OpReturnFromBlock)

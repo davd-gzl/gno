@@ -33,6 +33,7 @@ type Frame struct {
 	Defers        []Defer       // deferred calls
 	IsDefer       bool          // was func defer called
 	IsRevive      bool          // calling revive()
+	SavedStore    Store         // saved store before revive()
 	LastException *Exception    // previous m.exception
 
 	// test info
@@ -41,7 +42,7 @@ type Frame struct {
 
 func (fr Frame) String() string {
 	if fr.Func != nil {
-		return fmt.Sprintf("[FRAME FUNC:%v RECV:%s (%d args) %d/%d/%d/%d/%d LASTPKG:%s LASTRLM:%v WSW:%v DSW:%v ISDEFER:%v LASTEX:%v]",
+		return fmt.Sprintf("[FRAME FUNC:%v RECV:%s (%d args) %d/%d/%d/%d/%d LASTPKG:%s LASTRLM:%v WSW:%v DSW:%v ISDEFER:%v ISREVIVE:%v LASTEX:%v]",
 			fr.Func,
 			fr.Receiver,
 			fr.NumArgs,
@@ -55,6 +56,7 @@ func (fr Frame) String() string {
 			fr.WithCross,
 			fr.DidCrossing,
 			fr.IsDefer,
+			fr.IsRevive,
 			fr.LastException,
 		)
 	} else {

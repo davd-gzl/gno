@@ -1083,18 +1083,24 @@ func makeUverseNode() {
 			m.PushValue(typedBool(arg0.TV.IsTypedNil()))
 		},
 	)
-	// In the final form, it will do nothing if no abort; but otherwise
-	// will make it as if nothing happened (with full cache wrapping). This
-	// gives programs precognition, or at least hypotheticals.
-	// e.g. "If it **would have** done this, do that instead".
+	// Implements transactional execution with automatic rollback on panic.
+	// If fn() executes without panic, revive() will automatically panic
+	// to enforce the invariant that revive() functions must always panic.
 	//
-	// XXX This is only enabled in testing mode (for now), and test
-	// developers should be aware that behavior will change to be like
-	// above; currently it doesn't cache-wrap the fn function so residual
-	// state mutations remain even after revive(), but they will be
-	// "magically" rolled back upon panic in the future. The fn function
-	// must *always* panic in the end in order to prevent state mutations
-	// after a non-aborting transaction.
+	// Rollback behavior:
+	// - Full rollback of cache state via deep cloning
+	// - Works for both cross-realm and same-realm calls
+	// - Cross-realm calls also benefit from realm transaction rollback
+	//
+	// This provides software transactional memory (STM) semantics for
+	// testing exception handling in both cross-realm and same-realm scenarios.
+	//
+	// Usage:
+	//   ex := revive(func() {
+	//       // code that must panic
+	//       panic("test")
+	//   })
+	//   // ex contains the panic value
 	defNative("revive",
 		Flds( // params
 			"fn", FuncT(nil, nil),
@@ -1107,9 +1113,12 @@ func makeUverseNode() {
 			if m.ReviveEnabled {
 				last := m.LastFrame()
 
+				// Clone current store's cache state for rollback
+				last.SavedStore = m.Store.CacheClone()
+
 				// Push the no-abort result.
 				// last.SetRevive() marks the frame and this
-				// value will get replaced w/ exception.
+				// value will get replaced w/ exception if panic occurs.
 				m.PushValue(TypedValue{})
 				last.SetIsRevive()
 
