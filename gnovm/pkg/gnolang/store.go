@@ -79,8 +79,8 @@ type Store interface {
 	GetNative(pkgPath string, name Name) func(m *Machine) // for native functions
 	SetLogStoreOps(dst io.Writer)
 	LogFinalizeRealm(rlmpath string) // to mark finalization of realm boundaries
-	CacheClone() Store                                    // creates a shallow clone of cache state for rollback
-	CacheRestore(Store)                                   // restores cache state from a clone
+	CacheClone() Store               // creates a shallow clone of cache state for rollback
+	CacheRestore(Store)              // restores cache state from a clone
 	Print()
 }
 
@@ -1188,7 +1188,7 @@ func deepCloneObject(obj Object, alloc *Allocator) Object {
 		// Deep copy each value - special handling for PointerValues and HeapItemValues
 		for i := range v.Values {
 			tv := v.Values[i]
-			
+
 			// Special case 1: HeapItemValue needs deep cloning
 			if hi, ok := tv.V.(*HeapItemValue); ok {
 				clonedHI := deepCloneObject(hi, alloc).(*HeapItemValue)
@@ -1199,7 +1199,7 @@ func deepCloneObject(obj Object, alloc *Allocator) Object {
 				}
 				continue
 			}
-			
+
 			// Special case 2: PointerValue needs deep cloning of Base
 			if pv, ok := tv.V.(PointerValue); ok {
 				// Clone the PointerValue and its Base object
@@ -1208,7 +1208,7 @@ func deepCloneObject(obj Object, alloc *Allocator) Object {
 					Base:  pv.Base,
 					Index: pv.Index,
 				}
-				
+
 				// Deep clone the Base if it's an Object
 				if baseObj, ok := pv.Base.(Object); ok {
 					newPV.Base = deepCloneObject(baseObj, alloc)
@@ -1222,10 +1222,10 @@ func deepCloneObject(obj Object, alloc *Allocator) Object {
 						if pv.Index >= 0 && pv.Index < len(newBase.Fields) {
 							newPV.TV = &newBase.Fields[pv.Index]
 						}
-					// Add other cases as needed
+						// Add other cases as needed
 					}
 				}
-				
+
 				b.Values[i] = TypedValue{
 					T: tv.T,
 					V: newPV,
@@ -1247,14 +1247,14 @@ func deepCloneObject(obj Object, alloc *Allocator) Object {
 			Realm:      v.Realm,
 			Private:    v.Private,
 		}
-		
+
 		// Clone the block if it's a *Block (not a RefValue)
 		if block, ok := v.Block.(*Block); ok {
 			pv.Block = deepCloneObject(block, alloc)
 		} else {
 			pv.Block = v.Block
 		}
-		
+
 		// Clone FBlocks
 		if len(v.FBlocks) > 0 {
 			pv.FBlocks = make([]Value, len(v.FBlocks))
@@ -1266,7 +1266,7 @@ func deepCloneObject(obj Object, alloc *Allocator) Object {
 				}
 			}
 		}
-		
+
 		// Clone fBlocksMap if present
 		if v.fBlocksMap != nil {
 			pv.fBlocksMap = make(map[string]*Block, len(v.fBlocksMap))
@@ -1274,7 +1274,7 @@ func deepCloneObject(obj Object, alloc *Allocator) Object {
 				pv.fBlocksMap[k] = deepCloneObject(block, alloc).(*Block)
 			}
 		}
-		
+
 		return pv
 
 	case *ArrayValue:
@@ -1305,14 +1305,14 @@ func deepCloneObject(obj Object, alloc *Allocator) Object {
 			List:       nil,
 			vmap:       make(map[MapKey]*MapListItem, len(v.vmap)),
 		}
-		
+
 		if v.List != nil {
 			mv.List = &MapList{
 				Head: nil,
 				Tail: nil,
 				Size: v.List.Size,
 			}
-			
+
 			// Clone the linked list
 			var prevItem *MapListItem
 			for item := v.List.Head; item != nil; item = item.Next {
@@ -1322,7 +1322,7 @@ func deepCloneObject(obj Object, alloc *Allocator) Object {
 					Prev:  prevItem,
 					Next:  nil,
 				}
-				
+
 				if prevItem == nil {
 					mv.List.Head = newItem
 				} else {
@@ -1330,13 +1330,13 @@ func deepCloneObject(obj Object, alloc *Allocator) Object {
 				}
 				prevItem = newItem
 				mv.List.Tail = newItem
-				
+
 				// Update the vmap to point to the new item
 				keyStr, _ := item.Key.ComputeMapKey(nil, false)
 				mv.vmap[keyStr] = newItem
 			}
 		}
-		
+
 		return mv
 
 	case *HeapItemValue:
@@ -1347,13 +1347,13 @@ func deepCloneObject(obj Object, alloc *Allocator) Object {
 			ObjectInfo: v.ObjectInfo.Copy(),
 			Value:      v.Value.Copy(alloc),
 		}
-		
+
 		// Special case 1: MapValue needs deep cloning
 		if mapVal, ok := hi.Value.V.(*MapValue); ok {
 			clonedMap := deepCloneObject(mapVal, alloc).(*MapValue)
 			hi.Value.V = clonedMap
 		}
-		
+
 		// Special case 2: SliceValue needs deep cloning of its Base
 		if sv, ok := hi.Value.V.(*SliceValue); ok {
 			if baseArray, ok := sv.Base.(*ArrayValue); ok {
@@ -1367,7 +1367,7 @@ func deepCloneObject(obj Object, alloc *Allocator) Object {
 				}
 			}
 		}
-		
+
 		// Special case 3: PointerValue with Object base needs deep cloning
 		if pv, ok := hi.Value.V.(PointerValue); ok {
 			if baseObj, ok := pv.Base.(Object); ok {
@@ -1380,19 +1380,19 @@ func deepCloneObject(obj Object, alloc *Allocator) Object {
 				}
 				// Update TV to point into the new base
 				switch nb := clonedBase.(type) {
-					case *ArrayValue:
-						if pv.Index >= 0 && pv.Index < len(nb.List) {
-							newPV.TV = &nb.List[pv.Index]
-						}
-					case *StructValue:
-						if pv.Index >= 0 && pv.Index < len(nb.Fields) {
-							newPV.TV = &nb.Fields[pv.Index]
-						}
+				case *ArrayValue:
+					if pv.Index >= 0 && pv.Index < len(nb.List) {
+						newPV.TV = &nb.List[pv.Index]
+					}
+				case *StructValue:
+					if pv.Index >= 0 && pv.Index < len(nb.Fields) {
+						newPV.TV = &nb.Fields[pv.Index]
+					}
 				}
 				hi.Value.V = newPV
 			}
 		}
-		
+
 		return hi
 
 	default:
@@ -1423,9 +1423,9 @@ func (ds *defaultStore) CacheClone() Store {
 		gasConfig:      ds.gasConfig,
 
 		// Copy transient state
-		gasMeter:  ds.gasMeter,
-		opslog:    ds.opslog,
-		current:   slices.Clone(ds.current),
+		gasMeter:       ds.gasMeter,
+		opslog:         ds.opslog,
+		current:        slices.Clone(ds.current),
 		stagingPackage: ds.stagingPackage,
 
 		// Copy realm storage diffs
@@ -1449,7 +1449,7 @@ func (ds *defaultStore) CacheClone() Store {
 // This is used by revive() to rollback cache mutations on panic.
 func (ds *defaultStore) CacheRestore(cloned Store) {
 	src := cloned.(*defaultStore)
-	
+
 	// Restore objects in-place to maintain references
 	for k, clonedObj := range src.cacheObjects {
 		if currentObj, exists := ds.cacheObjects[k]; exists {
@@ -1460,14 +1460,14 @@ func (ds *defaultStore) CacheRestore(cloned Store) {
 			delete(ds.cacheObjects, k)
 		}
 	}
-	
+
 	// Remove any objects that were added during the revive call
 	for k := range ds.cacheObjects {
 		if _, existsInClone := src.cacheObjects[k]; !existsInClone {
 			delete(ds.cacheObjects, k)
 		}
 	}
-	
+
 	// Restore other cache state
 	ds.cacheTypes = src.cacheTypes
 	ds.cacheNodes = src.cacheNodes
@@ -1481,7 +1481,7 @@ func restoreObjectState(current, cloned Object) {
 	if reflect.TypeOf(current) != reflect.TypeOf(cloned) {
 		panic(fmt.Sprintf("type mismatch in restore: %T vs %T", current, cloned))
 	}
-	
+
 	switch cur := current.(type) {
 	case *Block:
 		if clone, ok := cloned.(*Block); ok {
@@ -1491,7 +1491,7 @@ func restoreObjectState(current, cloned Object) {
 			}
 			for i := range clone.Values {
 				cur.Values[i] = clone.Values[i]
-				// If the value contains a PointerValue to a HeapItemValue, 
+				// If the value contains a PointerValue to a HeapItemValue,
 				// the HeapItemValue will be restored separately in the cache loop
 			}
 			cur.bodyStmt = clone.bodyStmt
@@ -1506,7 +1506,7 @@ func restoreObjectState(current, cloned Object) {
 			} else {
 				cur.Block = clone.Block
 			}
-			
+
 			// Restore FBlocks
 			if len(cur.FBlocks) > 0 && len(clone.FBlocks) > 0 {
 				for i := range clone.FBlocks {
@@ -1519,7 +1519,7 @@ func restoreObjectState(current, cloned Object) {
 					}
 				}
 			}
-			
+
 			// Restore fBlocksMap
 			if cur.fBlocksMap != nil && clone.fBlocksMap != nil {
 				for k, cloneBlock := range clone.fBlocksMap {
@@ -1562,7 +1562,7 @@ func restoreObjectState(current, cloned Object) {
 			cur.List = clone.List
 			cur.vmap = clone.vmap
 		}
-	// Add more cases as needed for other object types
+		// Add more cases as needed for other object types
 	}
 }
 

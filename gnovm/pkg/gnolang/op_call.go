@@ -359,7 +359,7 @@ func (m *Machine) doOpReturnCallDefers() {
 				if rvfr.SavedStore != nil {
 					m.Store.CacheRestore(rvfr.SavedStore)
 				}
-				
+
 				m.PopFrameAndReturn()
 				// assign exception as return of revive().
 				resx := m.PeekValue(1)
@@ -367,13 +367,13 @@ func (m *Machine) doOpReturnCallDefers() {
 				m.Exception = nil // reset
 				return
 			}
-			
+
 			// No revive frame found - check if crossing realm boundary to abort
 			if m.isRealmBoundary(cfr) {
 				// Abort the transaction at realm boundary
 				panic(m.makeUnhandledPanicError())
 			}
-			
+
 			// Handle panic by calling OpReturnCallDefers on
 			// the next (last) call frame)
 			m.PopFrame()
@@ -387,7 +387,7 @@ func (m *Machine) doOpReturnCallDefers() {
 				m.pushPanic(typedString("revive() function must always panic"))
 				return
 			}
-			
+
 			// Otherwise continue with the return process,
 			// OpReturnFromBlock needs frame, don't pop here.
 			m.PushOp(OpReturnFromBlock)

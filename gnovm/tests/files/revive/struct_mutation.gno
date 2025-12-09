@@ -5,7 +5,7 @@ type Point struct {
 }
 
 type Container struct {
-	P Point
+	P     Point
 	Value int
 }
 
@@ -15,19 +15,19 @@ var c = Container{P: Point{X: 1, Y: 2}, Value: 100}
 func main() {
 	// Test 1: Simple struct mutation should be rolled back
 	println("Before revive - p:", p.X, p.Y)
-	
+
 	revive(func() {
 		p.X = 99
 		p.Y = 88
 		println("Inside revive - p:", p.X, p.Y)
 		panic("test panic")
 	})
-	
+
 	println("After revive - p:", p.X, p.Y)
-	
+
 	// Test 2: Nested struct mutation should be rolled back
 	println("Before revive - c:", c.P.X, c.P.Y, c.Value)
-	
+
 	revive(func() {
 		c.P.X = 500
 		c.P.Y = 600
@@ -35,7 +35,7 @@ func main() {
 		println("Inside revive - c:", c.P.X, c.P.Y, c.Value)
 		panic("nested panic")
 	})
-	
+
 	println("After revive - c:", c.P.X, c.P.Y, c.Value)
 }
 
