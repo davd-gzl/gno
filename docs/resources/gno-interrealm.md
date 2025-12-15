@@ -249,59 +249,13 @@ abort := revive(func() {
     })
 })
 abort == "cross-realm panic"
-```
 
-`revive(fn)` will execute 'fn' and return the exception that crossed
-a realm finalization boundary.
-
-### Transactional Semantics
-
-`revive(fn)` provides exception capture with automatic rollback for cross-realm calls:
-
-- **Exception Capture**: If `fn` panics during execution, `revive()` captures the
-  panic and returns it as an error value instead of propagating it.
-  
-- **State Rollback** (cross-realm only): When a panic crosses a realm boundary,
-  state changes are automatically rolled back. The realm's transaction is not
-  finalized, so mutations are discarded.
-  
-  **Important**: Same-realm mutations are NOT rolled back. If you need rollback
-  for same-realm code, ensure your test calls cross into a different realm.
-  
-- **Invariant Enforcement**: `fn` **must always panic**. If `fn` completes normally
-  without panicking, `revive()` will automatically panic with the message
-  "revive() function must always panic".
-  
-- **Testing Only**: This is only enabled in testing mode (when `Machine.ReviveEnabled`
-  is true). Production code cannot use `revive()`.
-
-Examples:
-
-```go
-// Cross-realm with rollback:
-ex := revive(func() {
-    Sign(cross, "test")  // Crosses into guestbook realm
-    // Any state changes in guestbook realm are rolled back
-})
-
-// Same-realm without rollback:
-var counter int
-ex := revive(func() {
-    counter++           // This mutation PERSISTS
-    panic("test")
-})
-// counter is now 1 - changes were NOT rolled back
-
-// This will panic with "revive() function must always panic":
+// revive() function must always panic:
 ex := revive(func() {
     println("completed normally")
     // ERROR: must panic!
 })
 ```
-
-TL;DR: `revive(fn)` is Gno's builtin for testing exception handling. It provides
-automatic rollback when panics cross realm boundaries, but not for same-realm mutations.
-
 
 ## `attach()`
 

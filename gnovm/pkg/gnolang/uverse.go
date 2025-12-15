@@ -1101,6 +1101,8 @@ func makeUverseNode() {
 	//       panic("test")
 	//   })
 	//   // ex contains the panic value
+	//
+	// XXX This is only enabled in testing mode (for now)
 	defNative("revive",
 		Flds( // params
 			"fn", FuncT(nil, nil),
