@@ -186,3 +186,186 @@ func TestFindByPrefix(t *testing.T) {
 		})
 	}
 }
+
+func TestDeepCloneObject_Block(t *testing.T) {
+	alloc := NewAllocator(10000)
+
+	// Create a block with some values
+	intVal := TypedValue{T: IntType}
+	intVal.SetInt(42)
+	strVal := TypedValue{T: StringType, V: StringValue("test")}
+
+	block := &Block{
+		ObjectInfo: ObjectInfo{},
+		Values:     []TypedValue{intVal, strVal},
+	}
+
+	// Clone the block
+	cloned := deepCloneObject(block, alloc).(*Block)
+
+	// Verify the clone is not the same object
+	require.NotSame(t, block, cloned)
+
+	// Verify the values are equal
+	require.Equal(t, len(block.Values), len(cloned.Values))
+	require.Equal(t, block.Values[0].T, cloned.Values[0].T)
+	require.Equal(t, block.Values[0].GetInt(), cloned.Values[0].GetInt())
+	require.Equal(t, int64(42), cloned.Values[0].GetInt())
+
+	// Modify original - should not affect clone
+	block.Values[0].SetInt(100)
+	require.Equal(t, int64(42), cloned.Values[0].GetInt())
+}
+
+func TestDeepCloneObject_PackageValue(t *testing.T) {
+	alloc := NewAllocator(10000)
+
+	// Create a TypedValue for the block
+	intVal := TypedValue{T: IntType}
+	intVal.SetInt(10)
+
+	// Create a package with a block
+	pkg := &PackageValue{
+		ObjectInfo: ObjectInfo{},
+		PkgName:    "test",
+		PkgPath:    "gno.land/p/test",
+		FNames:     []string{"func1", "func2"},
+		Block: &Block{
+			ObjectInfo: ObjectInfo{},
+			Values:     []TypedValue{intVal},
+		},
+	}
+
+	// Clone the package
+	cloned := deepCloneObject(pkg, alloc).(*PackageValue)
+
+	// Verify the clone is not the same object
+	require.NotSame(t, pkg, cloned)
+	require.Equal(t, pkg.PkgName, cloned.PkgName)
+	require.Equal(t, pkg.PkgPath, cloned.PkgPath)
+
+	// Verify the block is also cloned
+	origBlock := pkg.Block.(*Block)
+	clonedBlock := cloned.Block.(*Block)
+	require.NotSame(t, origBlock, clonedBlock)
+	require.Equal(t, origBlock.Values[0].GetInt(), clonedBlock.Values[0].GetInt())
+
+	// Modify original - should not affect clone
+	origBlock.Values[0].SetInt(99)
+	require.Equal(t, int64(10), clonedBlock.Values[0].GetInt())
+}
+
+func TestDeepCloneObject_ArrayValue(t *testing.T) {
+	alloc := NewAllocator(10000)
+
+	// Create TypedValues for the array
+	val1 := TypedValue{T: IntType}
+	val1.SetInt(1)
+	val2 := TypedValue{T: IntType}
+	val2.SetInt(2)
+	val3 := TypedValue{T: IntType}
+	val3.SetInt(3)
+
+	// Create an array
+	arr := &ArrayValue{
+		ObjectInfo: ObjectInfo{},
+		List:       []TypedValue{val1, val2, val3},
+	}
+
+	// Clone the array
+	cloned := deepCloneObject(arr, alloc).(*ArrayValue)
+
+	// Verify the clone is not the same object
+	require.NotSame(t, arr, cloned)
+	require.Equal(t, len(arr.List), len(cloned.List))
+
+	// Verify values are equal
+	for i := range arr.List {
+		require.Equal(t, arr.List[i].GetInt(), cloned.List[i].GetInt())
+	}
+
+	// Modify original - should not affect clone
+	arr.List[0].SetInt(999)
+	require.Equal(t, int64(1), cloned.List[0].GetInt())
+}
+
+func TestDeepCloneObject_StructValue(t *testing.T) {
+	alloc := NewAllocator(10000)
+
+	// Create field values
+	field1 := TypedValue{T: IntType}
+	field1.SetInt(42)
+	field2 := TypedValue{T: StringType, V: StringValue("hello")}
+
+	// Create a struct
+	s := &StructValue{
+		ObjectInfo: ObjectInfo{},
+		Fields:     []TypedValue{field1, field2},
+	}
+
+	// Clone the struct
+	cloned := deepCloneObject(s, alloc).(*StructValue)
+
+	// Verify the clone is not the same object
+	require.NotSame(t, s, cloned)
+	require.Equal(t, len(s.Fields), len(cloned.Fields))
+
+	// Verify values are equal
+	require.Equal(t, s.Fields[0].GetInt(), cloned.Fields[0].GetInt())
+	require.Equal(t, s.Fields[1].V.(StringValue), cloned.Fields[1].V.(StringValue))
+
+	// Modify original - should not affect clone
+	s.Fields[0].SetInt(100)
+	require.Equal(t, int64(42), cloned.Fields[0].GetInt())
+}
+
+func TestDeepCloneObject_MapValue(t *testing.T) {
+	alloc := NewAllocator(10000)
+
+	// Create a map with some entries
+	m := &MapValue{
+		ObjectInfo: ObjectInfo{},
+		List: &MapList{
+			Head: nil,
+			Tail: nil,
+			Size: 0,
+		},
+		vmap: make(map[MapKey]*MapListItem),
+	}
+
+	// Add some items
+	key1 := TypedValue{T: StringType, V: StringValue("key1")}
+	val1 := TypedValue{T: IntType}
+	val1.SetInt(10)
+	item1 := &MapListItem{Key: key1, Value: val1}
+	m.List.Head = item1
+	m.List.Tail = item1
+	m.List.Size = 1
+	keyStr1, _ := key1.ComputeMapKey(nil, false)
+	m.vmap[keyStr1] = item1
+
+	// Clone the map
+	cloned := deepCloneObject(m, alloc).(*MapValue)
+
+	// Verify the clone is not the same object
+	require.NotSame(t, m, cloned)
+	require.Equal(t, m.List.Size, cloned.List.Size)
+
+	// Verify the list items are different objects
+	require.NotSame(t, m.List.Head, cloned.List.Head)
+	require.Equal(t, m.List.Head.Value.GetInt(), cloned.List.Head.Value.GetInt())
+
+	// Modify original - should not affect clone
+	m.List.Head.Value.SetInt(999)
+	require.Equal(t, int64(10), cloned.List.Head.Value.GetInt())
+}
+
+func TestDeepCloneObject_Nil(t *testing.T) {
+	alloc := NewAllocator(10000)
+
+	// Clone nil object
+	cloned := deepCloneObject(nil, alloc)
+
+	// Verify it returns nil
+	require.Nil(t, cloned)
+}
