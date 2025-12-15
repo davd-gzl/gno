@@ -1167,53 +1167,25 @@ func (ds *defaultStore) LogFinalizeRealm(rlmpath string) {
 	}
 }
 
-// updatePointerValueTV updates a PointerValue's TV field to point into the cloned base.
-func updatePointerValueTV(pv *PointerValue, base Object) {
-	switch b := base.(type) {
-	case *ArrayValue:
-		if pv.Index >= 0 && pv.Index < len(b.List) {
-			pv.TV = &b.List[pv.Index]
-		}
-	case *StructValue:
-		if pv.Index >= 0 && pv.Index < len(b.Fields) {
-			pv.TV = &b.Fields[pv.Index]
-		}
-	case *Block:
-		if pv.Index >= 0 && pv.Index < len(b.Values) {
-			pv.TV = &b.Values[pv.Index]
-		}
-	case *HeapItemValue:
-		pv.TV = &b.Value
-	}
-}
-
-// clonePointerValue deep clones a PointerValue including its Base object.
-func clonePointerValue(pv PointerValue, alloc *Allocator, cloneMap map[ObjectID]Object) PointerValue {
-	newPV := PointerValue{TV: pv.TV, Base: pv.Base, Index: pv.Index}
-	if baseObj, ok := pv.Base.(Object); ok {
-		clonedBase := deepCloneObjectWithMap(baseObj, alloc, cloneMap)
-		newPV.Base = clonedBase
-		if obj, ok := clonedBase.(Object); ok {
-			updatePointerValueTV(&newPV, obj)
-		}
-	}
-	return newPV
-}
-
-// deepCloneObjectWithMap creates a deep copy of an object with circular reference detection.
-func deepCloneObjectWithMap(obj Object, alloc *Allocator, cloneMap map[ObjectID]Object) Object {
+// deepCloneObject creates a deep copy of an object for cache cloning.
+func deepCloneObject(obj Object, alloc *Allocator) Object {
 	if obj == nil {
 		return nil
 	}
+	cloneMap := make(map[ObjectID]Object)
+	return cloneObjectRecursive(obj, alloc, cloneMap)
+}
 
-	objID := obj.GetObjectID()
-	if !objID.IsZero() {
-		if cloned, exists := cloneMap[objID]; exists {
-			return cloned
+// cloneObjectRecursive clones an object with circular reference detection.
+func cloneObjectRecursive(obj Object, alloc *Allocator, cloneMap map[ObjectID]Object) Object {
+	if obj == nil {
+		return nil
+	}
+	if oid := obj.GetObjectID(); !oid.IsZero() {
+		if c, ok := cloneMap[oid]; ok {
+			return c
 		}
 	}
-
-	var cloned Object
 
 	switch v := obj.(type) {
 	case *Block:
@@ -1225,23 +1197,11 @@ func deepCloneObjectWithMap(obj Object, alloc *Allocator, cloneMap map[ObjectID]
 			Blank:      v.Blank,
 			bodyStmt:   v.bodyStmt,
 		}
-		cloned = b
-		if !objID.IsZero() {
-			cloneMap[objID] = cloned
+		if oid := obj.GetObjectID(); !oid.IsZero() {
+			cloneMap[oid] = b
 		}
 		for i, tv := range v.Values {
-			switch val := tv.V.(type) {
-			case *HeapItemValue:
-				if clonedHI, ok := deepCloneObjectWithMap(val, alloc, cloneMap).(*HeapItemValue); ok {
-					b.Values[i] = TypedValue{T: tv.T, V: clonedHI, N: tv.N}
-				} else {
-					b.Values[i] = tv.Copy(alloc)
-				}
-			case PointerValue:
-				b.Values[i] = TypedValue{T: tv.T, V: clonePointerValue(val, alloc, cloneMap), N: tv.N}
-			default:
-				b.Values[i] = tv.Copy(alloc)
-			}
+			b.Values[i] = cloneTypedValue(tv, alloc, cloneMap)
 		}
 		return b
 
@@ -1254,16 +1214,11 @@ func deepCloneObjectWithMap(obj Object, alloc *Allocator, cloneMap map[ObjectID]
 			Realm:      v.Realm,
 			Private:    v.Private,
 		}
-		cloned = pv
-		if !objID.IsZero() {
-			cloneMap[objID] = cloned
+		if oid := obj.GetObjectID(); !oid.IsZero() {
+			cloneMap[oid] = pv
 		}
 		if block, ok := v.Block.(*Block); ok {
-			if cb, ok := deepCloneObjectWithMap(block, alloc, cloneMap).(*Block); ok {
-				pv.Block = cb
-			} else {
-				pv.Block = v.Block
-			}
+			pv.Block = cloneObjectRecursive(block, alloc, cloneMap)
 		} else {
 			pv.Block = v.Block
 		}
@@ -1271,166 +1226,133 @@ func deepCloneObjectWithMap(obj Object, alloc *Allocator, cloneMap map[ObjectID]
 			pv.FBlocks = make([]Value, len(v.FBlocks))
 			for i, fb := range v.FBlocks {
 				if block, ok := fb.(*Block); ok {
-					if cb, ok := deepCloneObjectWithMap(block, alloc, cloneMap).(*Block); ok {
-						pv.FBlocks[i] = cb
-						continue
-					}
+					pv.FBlocks[i] = cloneObjectRecursive(block, alloc, cloneMap)
+				} else {
+					pv.FBlocks[i] = fb
 				}
-				pv.FBlocks[i] = fb
 			}
 		}
 		if v.fBlocksMap != nil {
 			pv.fBlocksMap = make(map[string]*Block, len(v.fBlocksMap))
 			for k, block := range v.fBlocksMap {
-				if cb, ok := deepCloneObjectWithMap(block, alloc, cloneMap).(*Block); ok {
-					pv.fBlocksMap[k] = cb
-				} else {
-					pv.fBlocksMap[k] = block
-				}
+				pv.fBlocksMap[k] = cloneObjectRecursive(block, alloc, cloneMap).(*Block)
 			}
 		}
 		return pv
 
-	case *ArrayValue:
-		cloned = v.Copy(alloc)
-		if !objID.IsZero() {
-			cloneMap[objID] = cloned
+	case *HeapItemValue:
+		hi := &HeapItemValue{
+			ObjectInfo: v.ObjectInfo.Copy(),
+			Value:      cloneTypedValue(v.Value, alloc, cloneMap),
 		}
-		return cloned
+		if oid := obj.GetObjectID(); !oid.IsZero() {
+			cloneMap[oid] = hi
+		}
+		return hi
+
+	case *ArrayValue:
+		c := v.Copy(alloc)
+		if oid := obj.GetObjectID(); !oid.IsZero() {
+			cloneMap[oid] = c
+		}
+		return c
 
 	case *StructValue:
-		cloned = v.Copy(alloc)
-		if !objID.IsZero() {
-			cloneMap[objID] = cloned
+		c := v.Copy(alloc)
+		if oid := obj.GetObjectID(); !oid.IsZero() {
+			cloneMap[oid] = c
 		}
-		return cloned
-
-	case *FuncValue:
-		fv := &FuncValue{
-			ObjectInfo: v.ObjectInfo.Copy(),
-			Type:       v.Type,
-			IsMethod:   v.IsMethod,
-			IsClosure:  v.IsClosure,
-			Source:     v.Source,
-			Name:       v.Name,
-			Parent:     v.Parent,
-			FileName:   v.FileName,
-			PkgPath:    v.PkgPath,
-			NativePkg:  v.NativePkg,
-			NativeName: v.NativeName,
-			Crossing:   v.Crossing,
-			body:       v.body,
-			nativeBody: v.nativeBody,
-		}
-		if len(v.Captures) > 0 {
-			fv.Captures = make([]TypedValue, len(v.Captures))
-			for i, cap := range v.Captures {
-				fv.Captures[i] = cap.Copy(alloc)
-			}
-		}
-		cloned = fv
-		if !objID.IsZero() {
-			cloneMap[objID] = cloned
-		}
-		return fv
-
-	case *BoundMethodValue:
-		bm := &BoundMethodValue{
-			ObjectInfo: v.ObjectInfo.Copy(),
-			Func:       v.Func.Copy(alloc),
-			Receiver:   v.Receiver.Copy(alloc),
-		}
-		cloned = bm
-		if !objID.IsZero() {
-			cloneMap[objID] = cloned
-		}
-		return bm
+		return c
 
 	case *MapValue:
-		mv := &MapValue{
-			ObjectInfo: v.ObjectInfo.Copy(),
-			vmap:       make(map[MapKey]*MapListItem, len(v.vmap)),
-		}
-		cloned = mv
-		if !objID.IsZero() {
-			cloneMap[objID] = cloned
+		mv := &MapValue{ObjectInfo: v.ObjectInfo.Copy(), vmap: make(map[MapKey]*MapListItem, len(v.vmap))}
+		if oid := obj.GetObjectID(); !oid.IsZero() {
+			cloneMap[oid] = mv
 		}
 		if v.List != nil {
 			mv.List = &MapList{Size: v.List.Size}
 			var prev *MapListItem
 			for item := v.List.Head; item != nil; item = item.Next {
-				newItem := &MapListItem{
-					Key:   item.Key.Copy(alloc),
-					Value: item.Value.Copy(alloc),
-					Prev:  prev,
-				}
+				newItem := &MapListItem{Key: item.Key.Copy(alloc), Value: item.Value.Copy(alloc), Prev: prev}
 				if prev == nil {
 					mv.List.Head = newItem
 				} else {
 					prev.Next = newItem
 				}
-				prev = newItem
-				mv.List.Tail = newItem
+				prev, mv.List.Tail = newItem, newItem
 				keyStr, _ := item.Key.ComputeMapKey(nil, false)
 				mv.vmap[keyStr] = newItem
 			}
 		}
 		return mv
 
-	case *HeapItemValue:
-		hi := &HeapItemValue{
-			ObjectInfo: v.ObjectInfo.Copy(),
-			Value:      v.Value.Copy(alloc),
+	case *FuncValue:
+		fv := v.Copy(alloc)
+		fv.IsClosure, fv.Captures = v.IsClosure, slices.Clone(v.Captures)
+		if oid := obj.GetObjectID(); !oid.IsZero() {
+			cloneMap[oid] = fv
 		}
-		cloned = hi
-		if !objID.IsZero() {
-			cloneMap[objID] = cloned
+		return fv
+
+	case *BoundMethodValue:
+		bm := &BoundMethodValue{ObjectInfo: v.ObjectInfo.Copy(), Func: v.Func.Copy(alloc), Receiver: v.Receiver.Copy(alloc)}
+		if oid := obj.GetObjectID(); !oid.IsZero() {
+			cloneMap[oid] = bm
 		}
-		// Handle nested Objects in Value.V
-		switch val := hi.Value.V.(type) {
-		case *MapValue:
-			if cm, ok := deepCloneObjectWithMap(val, alloc, cloneMap).(*MapValue); ok {
-				hi.Value.V = cm
-			}
-		case *SliceValue:
-			if baseObj, ok := val.Base.(Object); ok {
-				hi.Value.V = &SliceValue{
-					Base:   deepCloneObjectWithMap(baseObj, alloc, cloneMap),
-					Offset: val.Offset,
-					Length: val.Length,
-					Maxcap: val.Maxcap,
-				}
-			}
-		case PointerValue:
-			if _, ok := val.Base.(Object); ok {
-				hi.Value.V = clonePointerValue(val, alloc, cloneMap)
-			}
-		case *FuncValue:
-			if cf, ok := deepCloneObjectWithMap(val, alloc, cloneMap).(*FuncValue); ok {
-				hi.Value.V = cf
-			}
-		case *BoundMethodValue:
-			if cb, ok := deepCloneObjectWithMap(val, alloc, cloneMap).(*BoundMethodValue); ok {
-				hi.Value.V = cb
-			}
-		case *Block:
-			if cb, ok := deepCloneObjectWithMap(val, alloc, cloneMap).(*Block); ok {
-				hi.Value.V = cb
-			}
-		}
-		return hi
+		return bm
 
 	default:
 		return obj
 	}
 }
 
-// deepCloneObject creates a deep copy of an object for cache cloning.
-func deepCloneObject(obj Object, alloc *Allocator) Object {
-	if obj == nil {
-		return nil
+// cloneTypedValue clones a TypedValue, deep cloning Objects within.
+func cloneTypedValue(tv TypedValue, alloc *Allocator, cloneMap map[ObjectID]Object) TypedValue {
+	switch val := tv.V.(type) {
+	case *HeapItemValue:
+		return TypedValue{T: tv.T, V: cloneObjectRecursive(val, alloc, cloneMap), N: tv.N}
+	case PointerValue:
+		if baseObj, ok := val.Base.(Object); ok {
+			clonedBase := cloneObjectRecursive(baseObj, alloc, cloneMap)
+			newPV := PointerValue{TV: val.TV, Base: clonedBase, Index: val.Index}
+			// Update TV to point into cloned base
+			switch b := clonedBase.(type) {
+			case *ArrayValue:
+				if val.Index >= 0 && val.Index < len(b.List) {
+					newPV.TV = &b.List[val.Index]
+				}
+			case *StructValue:
+				if val.Index >= 0 && val.Index < len(b.Fields) {
+					newPV.TV = &b.Fields[val.Index]
+				}
+			case *Block:
+				if val.Index >= 0 && val.Index < len(b.Values) {
+					newPV.TV = &b.Values[val.Index]
+				}
+			case *HeapItemValue:
+				newPV.TV = &b.Value
+			}
+			return TypedValue{T: tv.T, V: newPV, N: tv.N}
+		}
+		return tv.Copy(alloc)
+	case *MapValue:
+		return TypedValue{T: tv.T, V: cloneObjectRecursive(val, alloc, cloneMap), N: tv.N}
+	case *SliceValue:
+		if baseObj, ok := val.Base.(Object); ok {
+			return TypedValue{T: tv.T, V: &SliceValue{
+				Base: cloneObjectRecursive(baseObj, alloc, cloneMap), Offset: val.Offset, Length: val.Length, Maxcap: val.Maxcap,
+			}, N: tv.N}
+		}
+		return tv.Copy(alloc)
+	case *FuncValue:
+		return TypedValue{T: tv.T, V: cloneObjectRecursive(val, alloc, cloneMap), N: tv.N}
+	case *BoundMethodValue:
+		return TypedValue{T: tv.T, V: cloneObjectRecursive(val, alloc, cloneMap), N: tv.N}
+	case *Block:
+		return TypedValue{T: tv.T, V: cloneObjectRecursive(val, alloc, cloneMap), N: tv.N}
+	default:
+		return tv.Copy(alloc)
 	}
-	return deepCloneObjectWithMap(obj, alloc, make(map[ObjectID]Object))
 }
 
 // CacheClone creates a deep clone of the store's cache state for rollback.
@@ -1466,7 +1388,7 @@ func (ds *defaultStore) CacheRestore(cloned Store) {
 	// Restore existing objects in-place
 	for k, clonedObj := range src.cacheObjects {
 		if currentObj, exists := ds.cacheObjects[k]; exists {
-			restoreObjectState(currentObj, clonedObj)
+			restoreObject(currentObj, clonedObj)
 		}
 	}
 	// Remove objects added during execution
@@ -1475,8 +1397,7 @@ func (ds *defaultStore) CacheRestore(cloned Store) {
 			delete(ds.cacheObjects, k)
 		}
 	}
-	ds.cacheTypes = src.cacheTypes
-	ds.cacheNodes = src.cacheNodes
+	ds.cacheTypes, ds.cacheNodes = src.cacheTypes, src.cacheNodes
 	ds.stagingPackage = src.stagingPackage
 	ds.realmStorageDiffs = make(map[string]int64, len(src.realmStorageDiffs))
 	for k, v := range src.realmStorageDiffs {
@@ -1484,152 +1405,123 @@ func (ds *defaultStore) CacheRestore(cloned Store) {
 	}
 }
 
-// restoreObjectInfo restores ObjectInfo fields from cloned to current.
-func restoreObjectInfo(cur, clone *ObjectInfo) {
-	cur.Hash = clone.Hash
-	cur.OwnerID = clone.OwnerID
-	cur.ModTime = clone.ModTime
-	cur.RefCount = clone.RefCount
-	cur.IsEscaped = clone.IsEscaped
-	cur.LastObjectSize = clone.LastObjectSize
-	cur.isDirty = clone.isDirty
-	cur.isDeleted = clone.isDeleted
-	cur.isNewReal = clone.isNewReal
-	cur.isNewEscaped = clone.isNewEscaped
-	cur.isNewDeleted = clone.isNewDeleted
-	cur.lastGCCycle = clone.lastGCCycle
-}
-
-// restoreObjectState restores an object's state in-place from a clone.
-func restoreObjectState(current, cloned Object) {
-	if reflect.TypeOf(current) != reflect.TypeOf(cloned) {
-		panic(fmt.Sprintf("type mismatch in restore: %T vs %T", current, cloned))
-	}
-
-	switch cur := current.(type) {
+// restoreObject restores an object's state in-place from a clone.
+func restoreObject(cur, clone Object) {
+	switch c := cur.(type) {
 	case *Block:
-		clone := cloned.(*Block)
-		restoreObjectInfo(&cur.ObjectInfo, &clone.ObjectInfo)
-		if len(cur.Values) != len(clone.Values) {
-			cur.Values = make([]TypedValue, len(clone.Values))
+		src := clone.(*Block)
+		c.ObjectInfo = src.ObjectInfo
+		if len(c.Values) != len(src.Values) {
+			c.Values = make([]TypedValue, len(src.Values))
 		}
-		copy(cur.Values, clone.Values)
-		cur.bodyStmt, cur.Source, cur.Parent, cur.Blank = clone.bodyStmt, clone.Source, clone.Parent, clone.Blank
+		copy(c.Values, src.Values)
+		c.bodyStmt, c.Source, c.Parent, c.Blank = src.bodyStmt, src.Source, src.Parent, src.Blank
 
 	case *PackageValue:
-		clone := cloned.(*PackageValue)
-		restoreObjectInfo(&cur.ObjectInfo, &clone.ObjectInfo)
-		cur.PkgName, cur.PkgPath, cur.FNames = clone.PkgName, clone.PkgPath, slices.Clone(clone.FNames)
-		cur.Realm, cur.Private = clone.Realm, clone.Private
-		if curBlock, ok := cur.Block.(*Block); ok {
-			if cloneBlock, ok := clone.Block.(*Block); ok {
-				restoreObjectState(curBlock, cloneBlock)
+		src := clone.(*PackageValue)
+		c.ObjectInfo = src.ObjectInfo
+		c.PkgName, c.PkgPath, c.FNames = src.PkgName, src.PkgPath, slices.Clone(src.FNames)
+		c.Realm, c.Private = src.Realm, src.Private
+		if curBlock, ok := c.Block.(*Block); ok {
+			if srcBlock, ok := src.Block.(*Block); ok {
+				restoreObject(curBlock, srcBlock)
 			} else {
-				cur.Block = clone.Block
+				c.Block = src.Block
 			}
 		} else {
-			cur.Block = clone.Block
+			c.Block = src.Block
 		}
-		if len(clone.FBlocks) > 0 {
-			if len(cur.FBlocks) != len(clone.FBlocks) {
-				cur.FBlocks = make([]Value, len(clone.FBlocks))
+		if len(src.FBlocks) > 0 {
+			if len(c.FBlocks) != len(src.FBlocks) {
+				c.FBlocks = make([]Value, len(src.FBlocks))
 			}
-			for i := range clone.FBlocks {
-				if curFB, ok := cur.FBlocks[i].(*Block); ok {
-					if cloneFB, ok := clone.FBlocks[i].(*Block); ok {
-						restoreObjectState(curFB, cloneFB)
+			for i := range src.FBlocks {
+				if curFB, ok := c.FBlocks[i].(*Block); ok {
+					if srcFB, ok := src.FBlocks[i].(*Block); ok {
+						restoreObject(curFB, srcFB)
 						continue
 					}
 				}
-				cur.FBlocks[i] = clone.FBlocks[i]
+				c.FBlocks[i] = src.FBlocks[i]
 			}
 		} else {
-			cur.FBlocks = nil
+			c.FBlocks = nil
 		}
-		if clone.fBlocksMap != nil {
-			if cur.fBlocksMap == nil {
-				cur.fBlocksMap = make(map[string]*Block, len(clone.fBlocksMap))
+		if src.fBlocksMap != nil {
+			if c.fBlocksMap == nil {
+				c.fBlocksMap = make(map[string]*Block, len(src.fBlocksMap))
 			}
-			for k := range cur.fBlocksMap {
-				if _, exists := clone.fBlocksMap[k]; !exists {
-					delete(cur.fBlocksMap, k)
+			for k := range c.fBlocksMap {
+				if _, exists := src.fBlocksMap[k]; !exists {
+					delete(c.fBlocksMap, k)
 				}
 			}
-			for k, cloneBlock := range clone.fBlocksMap {
-				if curBlock, exists := cur.fBlocksMap[k]; exists {
-					restoreObjectState(curBlock, cloneBlock)
+			for k, srcBlock := range src.fBlocksMap {
+				if curBlock, exists := c.fBlocksMap[k]; exists {
+					restoreObject(curBlock, srcBlock)
 				} else {
-					cur.fBlocksMap[k] = cloneBlock
+					c.fBlocksMap[k] = srcBlock
 				}
 			}
 		} else {
-			cur.fBlocksMap = nil
+			c.fBlocksMap = nil
 		}
 
 	case *HeapItemValue:
-		clone := cloned.(*HeapItemValue)
-		restoreObjectInfo(&cur.ObjectInfo, &clone.ObjectInfo)
-		cur.Value = clone.Value
+		src := clone.(*HeapItemValue)
+		c.ObjectInfo, c.Value = src.ObjectInfo, src.Value
 
 	case *ArrayValue:
-		clone := cloned.(*ArrayValue)
-		restoreObjectInfo(&cur.ObjectInfo, &clone.ObjectInfo)
-		if len(clone.List) > 0 {
-			if len(cur.List) != len(clone.List) {
-				cur.List = make([]TypedValue, len(clone.List))
+		src := clone.(*ArrayValue)
+		c.ObjectInfo = src.ObjectInfo
+		if len(src.List) > 0 {
+			if len(c.List) != len(src.List) {
+				c.List = make([]TypedValue, len(src.List))
 			}
-			copy(cur.List, clone.List)
+			copy(c.List, src.List)
 		} else {
-			cur.List = nil
+			c.List = nil
 		}
-		if len(clone.Data) > 0 {
-			if len(cur.Data) != len(clone.Data) {
-				cur.Data = make([]byte, len(clone.Data))
+		if len(src.Data) > 0 {
+			if len(c.Data) != len(src.Data) {
+				c.Data = make([]byte, len(src.Data))
 			}
-			copy(cur.Data, clone.Data)
+			copy(c.Data, src.Data)
 		} else {
-			cur.Data = nil
+			c.Data = nil
 		}
 
 	case *StructValue:
-		clone := cloned.(*StructValue)
-		restoreObjectInfo(&cur.ObjectInfo, &clone.ObjectInfo)
-		if len(cur.Fields) != len(clone.Fields) {
-			cur.Fields = make([]TypedValue, len(clone.Fields))
+		src := clone.(*StructValue)
+		c.ObjectInfo = src.ObjectInfo
+		if len(c.Fields) != len(src.Fields) {
+			c.Fields = make([]TypedValue, len(src.Fields))
 		}
-		copy(cur.Fields, clone.Fields)
+		copy(c.Fields, src.Fields)
 
 	case *MapValue:
-		clone := cloned.(*MapValue)
-		restoreObjectInfo(&cur.ObjectInfo, &clone.ObjectInfo)
-		cur.List, cur.vmap = clone.List, clone.vmap
+		src := clone.(*MapValue)
+		c.ObjectInfo, c.List, c.vmap = src.ObjectInfo, src.List, src.vmap
 
 	case *FuncValue:
-		clone := cloned.(*FuncValue)
-		restoreObjectInfo(&cur.ObjectInfo, &clone.ObjectInfo)
-		cur.Type, cur.IsMethod, cur.IsClosure = clone.Type, clone.IsMethod, clone.IsClosure
-		cur.Source, cur.Name, cur.FileName = clone.Source, clone.Name, clone.FileName
-		cur.PkgPath, cur.NativePkg, cur.NativeName = clone.PkgPath, clone.NativePkg, clone.NativeName
-		cur.Crossing, cur.body, cur.nativeBody = clone.Crossing, clone.body, clone.nativeBody
-		if len(clone.Captures) > 0 {
-			if len(cur.Captures) != len(clone.Captures) {
-				cur.Captures = make([]TypedValue, len(clone.Captures))
+		src := clone.(*FuncValue)
+		c.ObjectInfo = src.ObjectInfo
+		c.Type, c.IsMethod, c.IsClosure = src.Type, src.IsMethod, src.IsClosure
+		c.Source, c.Name, c.FileName = src.Source, src.Name, src.FileName
+		c.PkgPath, c.NativePkg, c.NativeName = src.PkgPath, src.NativePkg, src.NativeName
+		c.Crossing, c.body, c.nativeBody, c.Parent = src.Crossing, src.body, src.nativeBody, src.Parent
+		if len(src.Captures) > 0 {
+			if len(c.Captures) != len(src.Captures) {
+				c.Captures = make([]TypedValue, len(src.Captures))
 			}
-			copy(cur.Captures, clone.Captures)
+			copy(c.Captures, src.Captures)
 		} else {
-			cur.Captures = nil
+			c.Captures = nil
 		}
-		cur.Parent = clone.Parent
 
 	case *BoundMethodValue:
-		clone := cloned.(*BoundMethodValue)
-		restoreObjectInfo(&cur.ObjectInfo, &clone.ObjectInfo)
-		cur.Func, cur.Receiver = clone.Func, clone.Receiver
-
-	default:
-		if debug {
-			panic(fmt.Sprintf("restoreObjectState: unhandled type %T", current))
-		}
+		src := clone.(*BoundMethodValue)
+		c.ObjectInfo, c.Func, c.Receiver = src.ObjectInfo, src.Func, src.Receiver
 	}
 }
 
