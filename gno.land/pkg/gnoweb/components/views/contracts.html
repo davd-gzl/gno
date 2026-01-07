@@ -1,0 +1,117 @@
+{{ define "renderContracts" }}
+<article class="b-directory u-grid-full">
+  <header class="b-content-header">
+    <h1 class="title b-content-h1">{{ .Title }}</h1>
+    <div class="header-info">
+      <span>{{ .TotalCount }} Packages</span>
+    </div>
+  </header>
+
+  <div class="b-packages filter-list" data-controller="list">
+    <nav style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--g-space-3);">
+      <div class="packages-tabs">
+        <label>
+          <input type="radio" id="contracts-filter-all" name="contracts-filter" value="packages" checked class="u-sr-only" />
+          All&nbsp;Packages
+          <span data-list-target="packages-count" class="b-tag--secondary">
+            {{ .TotalCount }}
+          </span>
+        </label>
+        <label>
+          <input type="radio" id="contracts-filter-realms" name="contracts-filter" value="realms" class="u-sr-only" />
+          <svg class="c-icon">
+            <use href="#ico-realm"></use>
+          </svg>
+          Realms
+          <span data-list-target="realms-count" class="b-tag--secondary">
+            {{ .RealmCount }}
+          </span>
+        </label>
+        <label>
+          <input type="radio" id="contracts-filter-pure" name="contracts-filter" value="pures" class="u-sr-only" />
+          <svg class="c-icon">
+            <use href="#ico-pure"></use>
+          </svg>
+          Pure&nbsp;Packages
+          <span data-list-target="pure-count" class="b-tag--secondary">
+            {{ .PackageCount }}
+          </span>
+        </label>
+      </div>
+      <div class="packages-search b-input" style="margin-left: auto;">
+        <input type="text" id="packages-search" name="packages-search" data-list-target="search-bar"
+          data-action="input->list#search" placeholder="Search packages" aria-label="Search packages" />
+        <svg class="c-icon">
+          <use href="#ico-search"></use>
+        </svg>
+      </div>
+    </nav>
+    <div data-list-target="range" class="range">
+      {{- range .Contracts -}}
+      <article data-list-type-value="{{ .Type }}">
+        <div class="article-content">
+          <span class="title">
+            {{ if .IsRealm }}
+            <svg class="b-icon-action">
+              <use href="#ico-realm"></use>
+            </svg>
+            {{ else }}
+            <svg class="b-icon-action">
+              <use href="#ico-pure"></use>
+            </svg>
+            {{ end }}
+            <h3>
+              <a href="{{ .URL }}" data-list-target="range-title">{{- .Name -}}</a>
+            </h3>
+          </span>
+          <p>
+            <a href="{{ .URL }}">
+              {{ .Path }}
+            </a>
+          </p>
+        </div>
+      </article>
+      {{- end -}}
+    </div>
+    
+    {{/* Pagination */}}
+    <nav class="pagination" style="display: flex; justify-content: center; gap: var(--g-space-4); margin-top: var(--g-space-6); padding: var(--g-space-4);">
+      {{ if .HasPrevPage }}
+      <a href="{{ .BaseURL }}?page={{ add .CurrentPage -1 }}" class="b-btn">
+        <svg class="c-icon" style="transform: rotate(180deg);">
+          <use href="#ico-arrow-right"></use>
+        </svg>
+        Previous
+      </a>
+      {{ else }}
+      <span class="b-btn" style="opacity: 0.5; cursor: not-allowed;">
+        <svg class="c-icon" style="transform: rotate(180deg);">
+          <use href="#ico-arrow-right"></use>
+        </svg>
+        Previous
+      </span>
+      {{ end }}
+      
+      <span style="align-self: center; color: var(--s-color-text-tertiary);">
+        Page {{ .CurrentPage }}
+      </span>
+      
+      {{ if .HasNextPage }}
+      <a href="{{ .BaseURL }}?page={{ add .CurrentPage 1 }}" class="b-btn">
+        Next
+        <svg class="c-icon">
+          <use href="#ico-arrow-right"></use>
+        </svg>
+      </a>
+      {{ else }}
+      <span class="b-btn" style="opacity: 0.5; cursor: not-allowed;">
+        Next
+        <svg class="c-icon">
+          <use href="#ico-arrow-right"></use>
+        </svg>
+      </span>
+      {{ end }}
+    </nav>
+  </div>
+</article>
+{{ end }}

@@ -34,6 +34,10 @@ func registerCommonFuncs(funcs template.FuncMap) {
 		return vals.Has(key)
 	}
 	funcs["FormatRelativeTime"] = FormatRelativeTimeSince
+	// add performs integer addition for pagination
+	funcs["add"] = func(a, b int) int {
+		return a + b
+	}
 	// dict creates a map from key-value pairs for passing multiple values to templates
 	funcs["dict"] = func(kv ...any) (map[string]any, error) {
 		if len(kv)%2 != 0 {

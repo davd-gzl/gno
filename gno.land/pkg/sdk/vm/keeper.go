@@ -949,6 +949,16 @@ func collectWithLimit[T any](seq iter.Seq[T], limit int) []T {
 	return s
 }
 
+// QueryLatestPaths returns the latest deployed packages in reverse creation order.
+func (vm *VMKeeper) QueryLatestPaths(ctx sdk.Context, limit int) ([]string, error) {
+	if limit < 0 {
+		return nil, errors.New("cannot have negative limit value")
+	}
+
+	store := vm.newGnoTransactionStore(ctx) // throwaway (never committed)
+	return collectWithLimit(store.FindLatestPaths(limit), limit), nil
+}
+
 // QueryFuncs returns public facing function signatures.
 func (vm *VMKeeper) QueryFuncs(ctx sdk.Context, pkgPath string) (fsigs FunctionSignatures, err error) {
 	store := vm.newGnoTransactionStore(ctx) // throwaway (never committed)

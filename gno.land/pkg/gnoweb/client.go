@@ -45,6 +45,9 @@ type ClientAdapter interface {
 	// QueryPath list any path given the specified prefix
 	ListPaths(ctx context.Context, prefix string, limit int) ([]string, error)
 
+	// ListLatestPaths returns paths in reverse creation order (newest first)
+	ListLatestPaths(ctx context.Context, limit int) ([]string, error)
+
 	// Doc retrieves the JSON doc suitable for printing from a
 	// specified package path.
 	Doc(ctx context.Context, path string) (*doc.JSONDocumentation, error)
@@ -138,6 +141,24 @@ func (c *rpcClient) ListPaths(ctx context.Context, prefix string, limit int) ([]
 
 	// XXX: Consider moving this into gnoclient
 	res, err := c.query(ctx, qpath, []byte(prefix))
+	if err != nil {
+		return nil, err
+	}
+
+	// update the paths to be relative to the root instead of the domain
+	paths := strings.Split(strings.TrimSpace(string(res)), "\n")
+	for i, path := range paths {
+		paths[i] = strings.TrimPrefix(path, c.domain)
+	}
+
+	return paths, nil
+}
+
+// ListLatestPaths returns paths in reverse creation order (newest first).
+func (c *rpcClient) ListLatestPaths(ctx context.Context, limit int) ([]string, error) {
+	qpath := fmt.Sprintf("vm/qpathslatest?limit=%d", limit)
+
+	res, err := c.query(ctx, qpath, nil)
 	if err != nil {
 		return nil, err
 	}

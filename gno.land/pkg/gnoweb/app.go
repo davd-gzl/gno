@@ -25,9 +25,10 @@ var DefaultAliases = map[string]AliasTarget{
 	"/license":    {"/r/gnoland/pages:p/license", GnowebPath},
 	"/contribute": {"/r/gnoland/pages:p/contribute", GnowebPath},
 	"/links":      {"/r/gnoland/pages:p/links", GnowebPath},
-	"/events":     {"/r/gnoland/events", GnowebPath},
-	"/partners":   {"/r/gnoland/pages:p/partners", GnowebPath},
-	"/docs":       {"/u/docs", GnowebPath},
+	"/events":          {"/r/gnoland/events", GnowebPath},
+	"/partners":        {"/r/gnoland/pages:p/partners", GnowebPath},
+	"/docs":            {"/u/docs", GnowebPath},
+	"/latest-packages": {"", LatestPackagesList}, // List latest packages with pagination
 }
 
 // AppConfig contains configuration for gnoweb.

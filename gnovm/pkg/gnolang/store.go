@@ -72,6 +72,7 @@ type Store interface {
 	GetMemPackage(path string) *std.MemPackage
 	GetMemFile(path string, name string) *std.MemFile
 	FindPathsByPrefix(prefix string) iter.Seq[string]
+	FindLatestPaths(limit int) iter.Seq[string] // returns paths in reverse creation order (newest first)
 	IterMemPackage() <-chan *std.MemPackage
 	ClearObjectCache() // run before processing a message
 	GarbageCollectObjectCache(gcCycle int64)
@@ -1062,6 +1063,43 @@ func (ds *defaultStore) FindPathsByPrefix(prefix string) iter.Seq[string] {
 			if !yield(path) {
 				return
 			}
+		}
+	}
+}
+
+// FindLatestPaths retrieves paths in reverse creation order (newest first).
+// It returns up to 'limit' paths. If limit <= 0, returns all paths.
+func (ds *defaultStore) FindLatestPaths(limit int) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		ctrkey := []byte(backendPackageIndexCtrKey())
+		ctrbz := ds.baseStore.Get(ctrkey)
+		if ctrbz == nil {
+			return
+		}
+
+		ctr, err := strconv.Atoi(string(ctrbz))
+		if err != nil {
+			return
+		}
+
+		count := 0
+		// Iterate in reverse order (newest first)
+		for i := uint64(ctr); i >= 1; i-- {
+			if limit > 0 && count >= limit {
+				return
+			}
+
+			idxkey := []byte(backendPackageIndexKey(i))
+			pathBytes := ds.baseStore.Get(idxkey)
+			if pathBytes == nil {
+				continue
+			}
+
+			path := string(pathBytes)
+			if !yield(path) {
+				return
+			}
+			count++
 		}
 	}
 }

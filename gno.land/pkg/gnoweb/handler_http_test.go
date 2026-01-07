@@ -34,11 +34,12 @@ func (t *testingLogger) Write(b []byte) (n int, err error) {
 // Top-level stubClient definition for use in error simulation/custom behavior tests
 // stubClient simulates a client that can be customized per test by setting function fields.
 type stubClient struct {
-	realmFunc     func(ctx context.Context, path, args string) ([]byte, error)
-	fileFunc      func(ctx context.Context, path, filename string) ([]byte, gnoweb.FileMeta, error)
-	docFunc       func(ctx context.Context, path string) (*doc.JSONDocumentation, error)
-	listFilesFunc func(ctx context.Context, path string) ([]string, error)
-	listPathsFunc func(ctx context.Context, prefix string, limit int) ([]string, error)
+	realmFunc           func(ctx context.Context, path, args string) ([]byte, error)
+	fileFunc            func(ctx context.Context, path, filename string) ([]byte, gnoweb.FileMeta, error)
+	docFunc             func(ctx context.Context, path string) (*doc.JSONDocumentation, error)
+	listFilesFunc       func(ctx context.Context, path string) ([]string, error)
+	listPathsFunc       func(ctx context.Context, prefix string, limit int) ([]string, error)
+	listLatestPathsFunc func(ctx context.Context, limit int) ([]string, error)
 }
 
 func (s *stubClient) Realm(ctx context.Context, path, args string) ([]byte, error) {
@@ -74,6 +75,13 @@ func (s *stubClient) ListPaths(ctx context.Context, prefix string, limit int) ([
 		return s.listPathsFunc(ctx, prefix, limit)
 	}
 	return nil, errors.New("stubClient: ListPaths not implemented")
+}
+
+func (s *stubClient) ListLatestPaths(ctx context.Context, limit int) ([]string, error) {
+	if s.listLatestPathsFunc != nil {
+		return s.listLatestPathsFunc(ctx, limit)
+	}
+	return nil, errors.New("stubClient: ListLatestPaths not implemented")
 }
 
 type rawRenderer struct{}

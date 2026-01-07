@@ -8,9 +8,11 @@ import (
 	"go/token"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"path"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +40,7 @@ type AliasKind int
 const (
 	GnowebPath AliasKind = iota
 	StaticMarkdown
+	LatestPackagesList
 )
 
 type AliasTarget struct {
@@ -131,6 +134,19 @@ func (h *HTTPHandler) Get(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	// Check for special aliases that don't require a valid Gno URL
+	aliasTarget, aliasExists := h.Aliases[r.URL.Path]
+	if aliasExists && aliasTarget.Kind == LatestPackagesList {
+		indexData.Mode = components.ViewModeExplorer
+		status, bodyView := h.GetLatestPackagesView(r.Context(), r.URL, &indexData)
+		indexData.BodyView = bodyView
+		w.WriteHeader(status)
+		if err := components.IndexLayout(indexData).Render(w); err != nil {
+			h.Logger.Error("failed to render index component", "error", err)
+		}
+		return
+	}
+
 	// Parse the URL
 	gnourl, err := weburl.ParseFromURL(r.URL)
 	if err != nil {
@@ -210,6 +226,11 @@ func (h *HTTPHandler) prepareIndexBodyView(r *http.Request, indexData *component
 
 	aliasTarget, aliasExists := h.Aliases[r.URL.Path]
 
+	// Handle special alias types that don't require a valid Gno URL
+	if aliasExists && aliasTarget.Kind == LatestPackagesList {
+		return h.GetLatestPackagesView(ctx, r.URL, indexData)
+	}
+
 	// If the alias target exists and is a gnoweb path, replace the URL path with it.
 	if aliasExists && aliasTarget.Kind == GnowebPath {
 		r.URL.Path = aliasTarget.Value
@@ -217,7 +238,7 @@ func (h *HTTPHandler) prepareIndexBodyView(r *http.Request, indexData *component
 
 	gnourl, err := weburl.ParseFromURL(r.URL)
 	if err != nil {
-		h.Logger.Warn("invalid gno url path", "path", r.URL.Path, "error", err)
+		h.Logger.Warn("unable to parse url path", "path", r.URL.Path, "error", err)
 		return http.StatusNotFound, components.StatusErrorComponent("invalid path")
 	}
 
@@ -618,6 +639,98 @@ func (h *HTTPHandler) GetPathsListView(ctx context.Context, gnourl *weburl.GnoUR
 		components.DirLinkTypeFile,
 		indexData.Mode,
 	)
+}
+
+// GetLatestPackagesView renders a page listing packages (realms and pure packages).
+// Packages are sorted by creation order (newest first) with pagination.
+func (h *HTTPHandler) GetLatestPackagesView(ctx context.Context, reqURL *url.URL, indexData *components.IndexData) (int, *components.View) {
+	const pageSize = 50
+
+	// Parse page from query string
+	page := 1
+	if pageStr := reqURL.Query().Get("page"); pageStr != "" {
+		if parsed, err := strconv.Atoi(pageStr); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+
+	// Calculate offset
+	offset := (page - 1) * pageSize
+
+	// Fetch more paths than needed to determine if there's a next page
+	latestPaths, err := h.Client.ListLatestPaths(ctx, offset+pageSize+1)
+	if err != nil {
+		h.Logger.Error("unable to query latest paths", "error", err)
+		latestPaths = []string{}
+	}
+
+	// Determine if there are more pages
+	hasNextPage := len(latestPaths) > offset+pageSize
+	hasPrevPage := page > 1
+
+	// Slice to current page
+	startIdx := offset
+	endIdx := offset + pageSize
+	if startIdx > len(latestPaths) {
+		startIdx = len(latestPaths)
+	}
+	if endIdx > len(latestPaths) {
+		endIdx = len(latestPaths)
+	}
+	currentPagePaths := latestPaths[startIdx:endIdx]
+
+	// Build packages list
+	packages := make([]components.ContractInfo, 0, len(currentPagePaths))
+
+	for _, p := range currentPagePaths {
+		if p == "" {
+			continue
+		}
+
+		// Determine if it's a realm or pure package based on path
+		isRealm := strings.HasPrefix(p, "/r/")
+		packageType := "pure"
+		if isRealm {
+			packageType = "realm"
+		}
+
+		packages = append(packages, components.ContractInfo{
+			Path:    p,
+			Name:    path.Base(p),
+			Type:    packageType,
+			URL:     p,
+			IsRealm: isRealm,
+		})
+	}
+
+	// Count by type
+	realmCount := 0
+	packageCount := 0
+	for _, c := range packages {
+		if c.IsRealm {
+			realmCount++
+		} else {
+			packageCount++
+		}
+	}
+
+	// Set explorer mode
+	indexData.Mode = components.ViewModeExplorer
+	indexData.HeaderData.Mode = indexData.Mode
+	indexData.HeadData.Title = h.Static.Domain + " - Latest Packages"
+
+	return http.StatusOK, components.ContractsView(components.ContractsData{
+		Title:        "Latest Packages",
+		Contracts:    packages,
+		TotalCount:   len(packages),
+		RealmCount:   realmCount,
+		PackageCount: packageCount,
+		Mode:         indexData.Mode,
+		CurrentPage:  page,
+		HasNextPage:  hasNextPage,
+		HasPrevPage:  hasPrevPage,
+		BaseURL:      "/latest-packages",
+	})
 }
 
 // GetDirectoryView renders the directory view for a package, showing available files.

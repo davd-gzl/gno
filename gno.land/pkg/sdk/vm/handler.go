@@ -71,13 +71,14 @@ func (vh vmHandler) handleMsgRun(ctx sdk.Context, msg MsgRun) (res sdk.Result) {
 
 // query paths
 const (
-	QueryRender  = "qrender"
-	QueryFuncs   = "qfuncs"
-	QueryEval    = "qeval"
-	QueryFile    = "qfile"
-	QueryDoc     = "qdoc"
-	QueryPaths   = "qpaths"
-	QueryStorage = "qstorage"
+	QueryRender      = "qrender"
+	QueryFuncs       = "qfuncs"
+	QueryEval        = "qeval"
+	QueryFile        = "qfile"
+	QueryDoc         = "qdoc"
+	QueryPaths       = "qpaths"
+	QueryLatestPaths = "qpathslatest"
+	QueryStorage     = "qstorage"
 )
 
 func (vh vmHandler) Query(ctx sdk.Context, req abci.RequestQuery) (res abci.ResponseQuery) {
@@ -99,6 +100,8 @@ func (vh vmHandler) Query(ctx sdk.Context, req abci.RequestQuery) (res abci.Resp
 		res = vh.queryDoc(ctx, req)
 	case QueryPaths:
 		res = vh.queryPaths(ctx, req)
+	case QueryLatestPaths:
+		res = vh.queryLatestPaths(ctx, req)
 	case QueryStorage:
 		res = vh.queryStorage(ctx, req)
 	default:
@@ -174,6 +177,38 @@ func (vh vmHandler) queryPaths(ctx sdk.Context, req abci.RequestQuery) (res abci
 	}
 
 	paths, err := vh.vm.QueryPaths(ctx, target, limit)
+	if err != nil {
+		return sdk.ABCIResponseQueryFromError(err)
+	}
+
+	res.Data = []byte(strings.Join(paths, "\n"))
+	return
+}
+
+// queryLatestPaths retrieves package paths in reverse creation order (newest first).
+func (vh vmHandler) queryLatestPaths(ctx sdk.Context, req abci.RequestQuery) (res abci.ResponseQuery) {
+	const defaultLimit = 100
+	const maxLimit = 1_000
+
+	var query string
+	if i := strings.IndexByte(req.Path, '?'); i >= 0 {
+		query = req.Path[i+1:]
+	}
+
+	params, _ := url.ParseQuery(query)
+
+	// Get limit param, if any
+	limit := defaultLimit // default
+	if l := params.Get("limit"); len(l) > 0 {
+		var err error
+		if limit, err = strconv.Atoi(l); err != nil {
+			return sdk.ABCIResponseQueryFromError(fmt.Errorf("invalid limit argument"))
+		}
+
+		limit = min(limit, maxLimit) // cap to maxLimit
+	}
+
+	paths, err := vh.vm.QueryLatestPaths(ctx, limit)
 	if err != nil {
 		return sdk.ABCIResponseQueryFromError(err)
 	}

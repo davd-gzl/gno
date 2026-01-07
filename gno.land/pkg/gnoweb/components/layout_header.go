@@ -31,6 +31,7 @@ type HeaderData struct {
 func StaticHeaderGeneralLinks() []HeaderLink {
 	return []HeaderLink{
 		{Label: "About", URL: "https://gno.land/about"},
+		{Label: "Latest Packages", URL: "/latest-packages"},
 		{Label: "Docs", URL: "https://docs.gno.land/"},
 		{Label: "GitHub", URL: "https://github.com/gnolang"},
 	}

@@ -125,6 +125,31 @@ func (m *MockClient) ListPaths(ctx context.Context, prefix string, limit int) ([
 	return list, nil
 }
 
+// ListLatestPaths returns paths in reverse order (simulating newest first for mock).
+func (m *MockClient) ListLatestPaths(ctx context.Context, limit int) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context error: %w", err)
+	}
+
+	// Collect all paths
+	paths := make([]string, 0, len(m.Packages))
+	for _, pkg := range m.Packages {
+		paths = append(paths, pkg.Path)
+	}
+
+	// Reverse to simulate "newest first" (in mock, we just reverse the order)
+	for i, j := 0, len(paths)-1; i < j; i, j = i+1, j-1 {
+		paths[i], paths[j] = paths[j], paths[i]
+	}
+
+	// Apply limit
+	if limit > 0 && len(paths) > limit {
+		paths = paths[:limit]
+	}
+
+	return paths, nil
+}
+
 // Doc retrieves the JSON documentation for a specified package path.
 func (m *MockClient) Doc(ctx context.Context, path string) (*doc.JSONDocumentation, error) {
 	if err := ctx.Err(); err != nil {
