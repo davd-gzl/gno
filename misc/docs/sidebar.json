@@ -24,6 +24,7 @@
           "builders/quickstart",
           "builders/editor-setup",
           "builders/tutorial-minisocial",
+          "builders/erc20-to-grc20",
           "builders/rpc-clients",
           "builders/contributor-guide",
           "builders/running-a-node"
