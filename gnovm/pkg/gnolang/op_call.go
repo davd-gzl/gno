@@ -103,6 +103,19 @@ func (m *Machine) installCrossingCur(cx *CallExpr, isCrossing bool, pkgPath stri
 		// back after its own IsCurrent-strict check.
 		prev = *argtv
 	}
+	fr := m.LastFrame()
+	if !argtv.IsUndefined() &&
+		crossKeepsCallerRealm(fr.LastPackage, fr.Func) {
+		// The callee holds a frozen library realm, so PushFrameCall left
+		// m.Realm alone and there is no new realm to mint a cur for. Hand
+		// the caller's realm through unchanged: `cur` inside the callee
+		// is the caller's authority, and writes land in the caller's
+		// storage. Guarded on a defined argtv because the synthesized
+		// .origin form has no caller realm to pass through, only a
+		// previous one.
+		fr.Cur = prev
+		return
+	}
 	crlm := NewConcreteRealm(m.Alloc, pkgPath, prev)
 	argtv.Assign(m.Alloc, crlm, false)
 	m.LastFrame().Cur = crlm
@@ -187,42 +200,11 @@ func (m *Machine) topCrossingCur() (TypedValue, bool) {
 
 var gReturnStmt = &ReturnStmt{}
 
-// crossingFromTestFile reports whether fv is a crossing function declared
-// in a *_test.gno file. Used by doOpEnterCrossing to allow `p/` test files
-// to declare and call crossing functions (production p/ code still can't —
-// see crossingAllowed in preprocess.go).
-//
-// fv.FileName is populated for top-level FuncDecls but empty for function
-// literals (closures). For literals we walk to the Source AST node and
-// read its Location.File.
-func crossingFromTestFile(fv *FuncValue) bool {
-	if strings.HasSuffix(fv.FileName, "_test.gno") {
-		return true
-	}
-	if fv.Source == nil {
-		return false
-	}
-	return strings.HasSuffix(fv.Source.GetLocation().File, "_test.gno")
-}
-
-// This used to be the crossing() uverse function.
-// It should be run once upon calling every crossing function,
-// whether or not it was cross-called.
 func (m *Machine) doOpEnterCrossing() {
-	// Sanity check.
+	// No package-kind gate. Any package may declare a crossing
+	// function, so any package may enter one; crossingAllowed in
+	// preprocess.go is the matching compile-time rule.
 	fr1 := m.PeekCallFrame(1) // fr1.LastPackage called to create fr1.
-	if !m.Package.IsRealm() {
-		// Allow crossing functions declared in *_test.gno files so p/
-		// package tests can declare `TestXxx(cur realm, t *testing.T)`
-		// and drive migrated methods. Also allow the top-level `main`
-		// in ephemeral /e/ run packages so MsgRun scripts can opt into
-		// `func main(cur realm)`. Preprocess already enforces both
-		// carve-outs; this runtime check is the matching gate.
-		if !IsEphemeralPath(m.Package.PkgPath) &&
-			(fr1 == nil || fr1.Func == nil || !crossingFromTestFile(fr1.Func)) {
-			panic("expected crossing function in a realm package")
-		}
-	}
 
 	// Verify prior fr.WithCross or fr.DidCrossing.
 	// NOTE: fr.WithCross may or may not be true,
@@ -468,6 +450,19 @@ func (m *Machine) isRealmBoundary(cfr *Frame) bool {
 // Finalize realm updates if realm boundary.
 // NOTE: resource intensive
 func (m *Machine) maybeFinalize(cfr *Frame) {
+	// A cross-call whose callee is not a realm never switched realm
+	// (PushFrameCall skips setRealm for it), so returning from it leaves
+	// nothing to write back, and finalizing here would write the caller's
+	// realm out while the caller is still running. isRealmBoundary still
+	// reports the frame, because panic routing has to find the revive
+	// frame either way; only the finalize is suppressed. The
+	// m.Realm == cfr.LastRealm guard keeps a same-realm cross-call, which
+	// does not move m.Realm either but has always finalized here,
+	// behaving as it did.
+	if cfr.WithCross && crossKeepsCallerRealm(cfr.LastPackage, cfr.Func) &&
+		m.Realm == cfr.LastRealm {
+		return
+	}
 	if m.isRealmBoundary(cfr) && m.Realm != nil && !m.Realm.ID.IsImmutablePkg() {
 		// /p/ and stdlib packages now carry a frozen, immutable realm
 		// (so the readonly gate works inside their method bodies), but

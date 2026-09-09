@@ -1035,13 +1035,6 @@ func preprocess1(store Store, ctx BlockNode, n Node) Node {
 					// n.SetAttribute(ATTR_PREPROCESS_INCOMPLETE, true)
 					return n, TRANS_SKIP
 				}
-				// a crossing function can only be declared in a realm
-				// (or, as a carve-out, in any *_test.gno file so p/ tests
-				// can declare `TestXxx(cur realm, t *testing.T)` to drive
-				// migrated methods).
-				if ft.IsCrossing() && !crossingAllowed(ctx, n) {
-					panic(fmt.Sprintf("crossing function literal (realm first argument) declared in non-realm package: %v", n))
-				}
 				// push func body block.
 				pushInitBlock(n, &last, &stack)
 				// define parameters in new block.
@@ -1144,13 +1137,6 @@ func preprocess1(store Store, ctx BlockNode, n Node) Node {
 				// retrieve cached function type.
 				// the type and receiver are already set in predefineRecursively.
 				ft := getType(&n.Type).(*FuncType)
-				// a crossing function can only be declared in a realm
-				// (or, as a carve-out, in any *_test.gno file so p/ tests
-				// can declare `TestXxx(cur realm, t *testing.T)` to drive
-				// migrated methods).
-				if ft.IsCrossing() && !crossingAllowed(ctx, n) {
-					panic(fmt.Sprintf("crossing function (realm first argument) declared in non-realm package: %v", n))
-				}
 				// push func body block.
 				pushInitBlock(n, &last, &stack)
 				// define receiver in new block, if method.
@@ -2156,7 +2142,13 @@ func preprocess1(store Store, ctx BlockNode, n Node) Node {
 									// lazy interface bind (no concrete func
 									// until call time); fall through, the
 									// runtime check covers both.
-									if fv.PkgPath != ctxpn.PkgPath {
+									// A frozen library callee has no realm of
+									// its own to cur-call into: entering it
+									// keeps the caller's realm either way, so
+									// `f(cur)` is the honest spelling and
+									// `f(cross(cur))` would claim a boundary
+									// that never opens.
+									if fv.PkgPath != ctxpn.PkgPath && !isImmutableLibraryPath(fv.PkgPath) {
 										panic(fmt.Sprintf("cannot cur-call to external realm function %s.%v from %v",
 											fv.PkgPath, n.Func, ctxpn.PkgPath))
 									}
@@ -4617,40 +4609,6 @@ func setPreprocessed(x Node) Node {
 		x.SetAttribute(ATTR_PREPROCESSED, true)
 	}
 	return x
-}
-
-func isRealm(ctx BlockNode) bool {
-	pn := packageOf(ctx)
-	return IsRealmPath(pn.PkgPath)
-}
-
-// crossingAllowed reports whether n (a FuncDecl or FuncLitExpr with a
-// realm-first-arg signature) is allowed to be a crossing function in ctx.
-// Crossing functions are allowed in realm packages OR in any *_test.gno
-// file (regardless of package). The test-file carve-out lets `p/` package
-// tests declare `func TestXxx(cur realm, t *testing.T)` and pass `cur`
-// into newly-migrated methods — production code in `p/` still can't
-// define crossing functions.
-//
-// MsgRun ephemeral `/e/` packages may also declare a crossing top-level
-// `main` — the single entry point — so a run script can opt into
-// `func main(cur realm)` + `cross(cur)`. Only the FuncDecl named `main`
-// is allowed (no helper functions, no function literals), matching the
-// ephemeral one-shot model.
-func crossingAllowed(ctx BlockNode, n BlockNode) bool {
-	if isRealm(ctx) {
-		return true
-	}
-	file := n.GetLocation().File
-	if strings.HasSuffix(file, "_test.gno") {
-		return true
-	}
-	if fd, ok := n.(*FuncDecl); ok && fd.Name == "main" {
-		if IsEphemeralPath(packageOf(ctx).PkgPath) {
-			return true
-		}
-	}
-	return false
 }
 
 func packageOf(last BlockNode) *PackageNode {

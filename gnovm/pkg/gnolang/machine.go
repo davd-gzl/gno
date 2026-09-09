@@ -302,6 +302,36 @@ func (m *Machine) SetActivePackage(pv *PackageValue) {
 //
 // Accepts nil — clears currentRealmID to PkgID{} which matches
 // "no realm context."
+// crossKeepsCallerRealm reports whether a cross-call into callee leaves the
+// caller's realm in place instead of switching to the callee's.
+//
+// True only for a call from one package into a different package that
+// holds a frozen library realm. /p/ and the stdlibs own no storage, so
+// there is nothing to switch to, and the point of handing one a leading
+// realm is to act on the caller's.
+//
+// A call that stays inside one package is excluded. `f(cross(cur))` on a
+// sibling or a function literal is the self-cross idiom, which mints a
+// fresh cur for the same realm; /p/ test files use it to build the frame
+// that rlm.Previous() resolves against.
+func crossKeepsCallerRealm(caller *PackageValue, callee *FuncValue) bool {
+	if caller == nil || callee == nil {
+		return false
+	}
+	if callee.IsClosure {
+		// A function literal is the declaring code's own body, reached
+		// through whatever helper was handed it. Crossing into one mints
+		// as before: p/ test files write `func(cur realm){...}(cross(cur))`
+		// to build the frame rlm.Previous() resolves against, and uassert
+		// hands such a literal back across a package boundary.
+		return false
+	}
+	if caller.PkgPath == callee.PkgPath {
+		return false
+	}
+	return isImmutableLibraryPath(callee.PkgPath)
+}
+
 func (m *Machine) setRealm(r *Realm) {
 	m.Realm = r
 	if r != nil {
@@ -2508,15 +2538,24 @@ func (m *Machine) PushFrameCall(cx *CallExpr, fv *FuncValue, recv TypedValue, is
 				mrpath,
 			))
 		}
-		r := pv.GetRealm()
-		assertBorrowedRealm(pv.PkgPath, r)
-		m.setRealm(r)
+		// See crossKeepsCallerRealm: a cross-package call into a frozen
+		// library keeps the caller's realm. Everything else switches as
+		// before, including the same-package self-cross idiom. See
+		// installCrossingCur for the matching pass-through of `cur`.
+		if !crossKeepsCallerRealm(m.LastFrame().LastPackage, fv) {
+			r := pv.GetRealm()
+			assertBorrowedRealm(pv.PkgPath, r)
+			m.setRealm(r)
+		}
 		return
 	}
 
 	// Non-crossing call of a crossing function like Public(cur, ...).
 	if fv.IsCrossing() {
-		if m.Realm != pv.Realm {
+		// Same rule as the cross path: a cross-package frozen library
+		// callee runs in the caller's realm, so there is no external
+		// realm to reach and nothing to compare.
+		if !crossKeepsCallerRealm(m.LastFrame().LastPackage, fv) && m.Realm != pv.Realm {
 			// Illegal crossing to external realm.
 			// (the function was variable and run-time check was necessary).
 			// panic; not explicit
