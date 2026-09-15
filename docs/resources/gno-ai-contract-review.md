@@ -17,7 +17,6 @@ func AdminAction(caller address) { ... }
 
 // RIGHT: derive identity from the live crossing frame
 func AdminAction(cur realm) {
-    if !cur.IsCurrent() { panic("spoofed realm") }
     addr := cur.Previous().Address()
     ...
 }
@@ -137,13 +136,14 @@ authorizes the writes inside the method body.
 pointer to mutable state. If the pointed-to type has any mutation method, it is a
 live mutator handle. Never return the containing struct as a pointer.
 
-### 9. `unsafe.PreviousRealm()` — old API, skips frame verification
+### 9. `unsafe.PreviousRealm()` — old API, answers from the wrong frame
 
-Using `chain/runtime/unsafe.PreviousRealm()` directly bypasses the `cur.IsCurrent()`
-safety check. It should never appear alongside a `cur realm` parameter.
+`chain/runtime/unsafe.PreviousRealm()` walks the frame stack, so it answers from
+wherever it is called rather than naming the realm that entered this function. It
+should never appear alongside a `cur realm` parameter.
 
 ```go
-// WRONG: cur is accepted but ignored; no IsCurrent() guard
+// WRONG: cur is accepted but ignored
 import "chain/runtime/unsafe"
 func Set(cur realm, key, value string) {
     caller := unsafe.PreviousRealm().Address()
@@ -152,7 +152,6 @@ func Set(cur realm, key, value string) {
 
 // RIGHT
 func Set(cur realm, key, value string) {
-    if !cur.IsCurrent() { panic("spoofed realm") }
     caller := cur.Previous().Address()
     ...
 }
@@ -235,7 +234,7 @@ Two cases where the swap is **wrong**, both found by making it:
 
 ## Review Checklist
 
-- [ ] Authenticated mutators take `cur realm` and call `cur.IsCurrent()`
+- [ ] Authenticated mutators take `cur realm` and derive identity from `cur.Previous()`
 - [ ] No import of `chain/runtime/unsafe` alongside `cur realm` parameters
 - [ ] Payment-guarded functions use `cur.Previous().IsUserCall()`
 - [ ] No exported function returns a pointer to internal mutable state

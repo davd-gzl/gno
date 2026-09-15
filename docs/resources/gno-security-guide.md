@@ -358,9 +358,6 @@ the address inside:
 
 ```go
 func DoThing(cur realm) {
-    if !cur.IsCurrent() {
-        panic("spoofed realm")
-    }
     addr := cur.Previous().Address()
     log[addr] = ...
 }
@@ -383,22 +380,22 @@ the `Address()` or `PkgPath()` (plain strings), not the realm value.
 
 `chain/runtime/unsafe.PreviousRealm()` is the pre-`cur realm` API for
 obtaining the previous realm. Using it in a crossing function that already
-receives `cur realm` is always wrong: it bypasses the `IsCurrent()` frame
-verification that makes `cur.Previous()` safe, and silently ignores the
-`cur` capability token the runtime minted for exactly this purpose.
+receives `cur realm` is always wrong: the walk answers from wherever it
+stands rather than from the frame this function was entered with, and it
+silently ignores the `cur` capability token the runtime minted for exactly
+this purpose.
 
 ```go
-// WRONG: cur is accepted but never used; no IsCurrent() guard
+// WRONG: cur is accepted but never used
 import "chain/runtime/unsafe"
 
 func Set(cur realm, key, value string) {
-    caller := unsafe.PreviousRealm().Address()  // skips frame check
+    caller := unsafe.PreviousRealm().Address()  // reads a stack walk
     ...
 }
 
 // RIGHT
 func Set(cur realm, key, value string) {
-    if !cur.IsCurrent() { panic("spoofed realm") }
     caller := cur.Previous().Address()
     ...
 }
@@ -410,8 +407,7 @@ crossing functions (`func F(cur realm, ...)`) is a red flag. The
 in realms that have not yet been migrated to the `cur realm` API.
 
 **Rule**: in crossing functions, always derive caller identity from
-`cur.Previous()` under a `cur.IsCurrent()` guard. Delete the
-`chain/runtime/unsafe` import.
+`cur.Previous()`. Delete the `chain/runtime/unsafe` import.
 
 ---
 
@@ -499,7 +495,7 @@ Before deploying a realm:
 
 - [ ] Every exported function/method I expose does one of:
   - Pure read (returns primitives or values, no internal pointers).
-  - Takes `cur realm` and authenticates via `cur.IsCurrent()`.
+  - Takes `cur realm` and authenticates via `cur.Previous()`.
   - Documented intentionally permissive (faucet, public mint).
 
 - [ ] No exported var or function returns a pointer aliasing
@@ -558,19 +554,13 @@ func Value() int {
     return gCounter.value
 }
 
-// Authenticated mutator. cur realm + IsCurrent() check.
+// Intentionally permissive mutator: any caller may increment.
 func Increment(cur realm) {
-    if !cur.IsCurrent() {
-        panic("spoofed realm")
-    }
     gCounter.value++
 }
 
 // Authenticated owner-gated mutator.
 func SetOwner(cur realm, newOwner address) {
-    if !cur.IsCurrent() {
-        panic("spoofed realm")
-    }
     if gCounter.owner != "" && cur.Previous().Address() != gCounter.owner {
         panic("not the owner")
     }
@@ -600,7 +590,7 @@ Attackers cannot:
 - Write `gCounter.value` directly (unexported field).
 - Get `gCounter` and Apply-launder it (no Apply method, no exported
   pointer).
-- Forge a `cur realm` (the `IsCurrent()` check fails).
+- Forge a `cur realm` (only the runtime mints one, on entry).
 - Spoof `cur.Previous().Address()` (it's the live crossing frame).
 
 ---

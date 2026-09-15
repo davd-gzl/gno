@@ -28,8 +28,7 @@ protections.
 
 - **Classes 1a/1b**: never declare an interface method that takes
   `cur realm`. Take `caller address` instead, and let the calling code
-  derive the address from `cur.Previous().Address()` under an
-  `IsCurrent()` guard at the call site.
+  derive the address from `cur.Previous().Address()` at the call site.
 - **Class 2**: never trust an `address` or `pkgPath` parameter as
   caller-identity; derive it inside the function from
   `rlm.Previous().Address()` under `rlm.IsCurrent()`. Never trust
