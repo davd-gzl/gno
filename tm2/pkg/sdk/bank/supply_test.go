@@ -442,3 +442,22 @@ func TestSubtractRejectsAnAccountForTheWrongAddress(t *testing.T) {
 	require.Equal(t, int64(500), env.bankk.GetCoin(ctx, victim, testAccountDenom),
 		"the victim's balance must be untouched")
 }
+
+// A burn of exactly one more than the recorded supply is the smallest that would
+// take the counter negative, and it must be refused as surely as a larger one.
+func TestBurnOneAboveRecordedSupplyIsRefused(t *testing.T) {
+	t.Parallel()
+
+	env := setupTestEnv()
+	ctx := env.ctx
+	a := crypto.AddressFromPreimage([]byte("one-above"))
+	require.NoError(t, env.bankk.SetCoins(ctx, a, std.Coins{{Denom: testRealmDenom, Amount: 10}}))
+	env.bankk.RecomputeSupply(ctx)
+	// SetCoins is supply-blind: 11 held against a record of 10.
+	require.NoError(t, env.bankk.SetCoins(ctx, a, std.Coins{{Denom: testRealmDenom, Amount: 11}}))
+
+	require.Error(t, env.bankk.BurnCoins(ctx, a, std.Coins{{Denom: testRealmDenom, Amount: 11}}))
+	require.Equal(t, int64(10), env.bankk.TotalSupply(ctx, testRealmDenom))
+	require.Equal(t, int64(11), env.bankk.GetCoin(ctx, a, testRealmDenom),
+		"a refused burn must not have debited")
+}

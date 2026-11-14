@@ -1645,3 +1645,35 @@ func TestSessionExpiredErrorIncludesTimestamps(t *testing.T) {
 	assert.Contains(t, res.Log, "expires_at=", "expiry error should include expires_at")
 	assert.Contains(t, res.Log, "block_time=", "expiry error should include block_time")
 }
+
+// A session expiring at the current block time could never sign: the ante handler
+// refuses one whose expiry is not after the block time. Creation refuses it too.
+func TestSessionCreateExpiringAtBlockTimeIsRefused(t *testing.T) {
+	env, _, _, masterAddr := setupSessionEnv(t)
+	ctx := env.ctx
+	_, sessionPub, _ := tu.KeyTestPubAddr()
+
+	res := NewHandler(env.acck, env.gk).Process(ctx, MsgCreateSession{
+		Creator:    masterAddr,
+		SessionKey: sessionPub,
+		ExpiresAt:  ctx.BlockTime().Unix(),
+		SpendLimit: sessionSpendLimit(),
+	})
+	require.False(t, res.IsOK(), "a session expiring at the block time must be refused")
+	assert.Contains(t, res.Log, "session already expired")
+}
+
+// A negative expiry is refused before the handler runs, the smallest one
+// included, since 0 is the value that means no expiry.
+func TestSessionCreateNegativeExpiryIsRefusedByValidateBasic(t *testing.T) {
+	_, _, masterAddr := tu.KeyTestPubAddr()
+	_, sessionPub, _ := tu.KeyTestPubAddr()
+
+	err := MsgCreateSession{
+		Creator:    masterAddr,
+		SessionKey: sessionPub,
+		ExpiresAt:  -1,
+		SpendLimit: sessionSpendLimit(),
+	}.ValidateBasic()
+	require.Error(t, err, "ValidateBasic should reject a negative expires_at")
+}
